@@ -155,6 +155,16 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus-data:/prometheus
+  
+  job-submitter:
+    build:
+      context: ./flink-job-submitter # Assuming your Dockerfile is here
+    container_name: job-submitter
+    depends_on:
+      - jobmanager
+      - taskmanager
+    volumes:
+      - ./target:/jobs
 
 volumes:
   zk-data:

@@ -114,7 +114,8 @@ class RealEstateDataGenerator:
         property_type = random.choice(self.property_types)
         
         # Base price influenced by neighborhood income
-        base_price = neighborhood['avg_income'] * random.uniform(4, 8)
+        base_price = float(neighborhood['avg_income']) * random.uniform(4, 8)
+
         
         # Property characteristics
         if property_type['type_name'] == 'Single Family':

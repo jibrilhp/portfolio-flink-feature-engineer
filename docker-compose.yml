@@ -2,8 +2,6 @@ services:
   # Zookeeper for Kafka
   zookeeper:
     image: confluentinc/cp-zookeeper:7.4.0
-    hostname: zookeeper
-    container_name: zookeeper
     ports:
       - "2181:2181"
     environment:
@@ -14,10 +12,8 @@ services:
       - zk-txn-logs:/var/lib/zookeeper/log
 
   # Kafka Broker
-  kafka:
+  broker:
     image: confluentinc/cp-kafka:7.4.0
-    hostname: broker
-    container_name: broker
     depends_on:
       - zookeeper
     ports:
@@ -40,10 +36,8 @@ services:
   # Schema Registry
   schema-registry:
     image: confluentinc/cp-schema-registry:7.4.0
-    hostname: schema-registry
-    container_name: schema-registry
     depends_on:
-      - kafka
+      - broker
     ports:
       - "8081:8081"
     environment:
@@ -77,8 +71,6 @@ services:
   # Flink JobManager
   jobmanager:
     image: flink:1.18-scala_2.12-java17
-    hostname: jobmanager
-    container_name: jobmanager
     ports:
       - "8080:8080"
     command: jobmanager
@@ -86,6 +78,10 @@ services:
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: jobmanager
+        jobmanager.bind-host: 0.0.0.0
+        rest.address: 0.0.0.0
+        rest.bind-address: 0.0.0.0
+        rest.port: 8080
         taskmanager.numberOfTaskSlots: 4
         parallelism.default: 2
         state.backend: filesystem
@@ -96,10 +92,9 @@ services:
       - flink-savepoints:/tmp/flink-savepoints
       - ./flink-jobs:/opt/flink/jobs
 
-  # Flink TaskManager
+  # Flink TaskManager - FIXED VERSION  
   taskmanager:
     image: flink:1.18-scala_2.12-java17
-    hostname: taskmanager
     depends_on:
       - jobmanager
     command: taskmanager
@@ -108,6 +103,8 @@ services:
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: jobmanager
+        taskmanager.bind-host: 0.0.0.0
+        taskmanager.host: taskmanager
         taskmanager.numberOfTaskSlots: 4
         parallelism.default: 2
     volumes:
@@ -121,7 +118,7 @@ services:
       dockerfile: Dockerfile
     container_name: data-generator
     depends_on:
-      - kafka
+      - broker
       - postgres
     environment:
       KAFKA_BOOTSTRAP_SERVERS: broker:29092

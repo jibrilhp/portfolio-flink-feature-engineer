@@ -33,13 +33,13 @@ services:
     volumes:
       - kafka-data:/var/lib/kafka/data
 
-  # Schema Registry
+  # Schema Registry - CHANGED PORT TO AVOID CONFLICT
   schema-registry:
     image: confluentinc/cp-schema-registry:7.4.0
     depends_on:
       - broker
     ports:
-      - "8081:8081"
+      - "8081"  
     environment:
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'broker:29092'
@@ -68,11 +68,12 @@ services:
     volumes:
       - redis-data:/data
 
-  # Flink JobManager
+ 
   jobmanager:
+    container_name: jobmanager
     image: flink:1.18-scala_2.12-java17
     ports:
-      - "8080:8080"
+      - "8081:8081"  
     command: jobmanager
     environment:
       - |
@@ -81,32 +82,33 @@ services:
         jobmanager.bind-host: 0.0.0.0
         rest.address: 0.0.0.0
         rest.bind-address: 0.0.0.0
-        rest.port: 8080
-        taskmanager.numberOfTaskSlots: 4
-        parallelism.default: 2
+        rest.port: 8081
+        taskmanager.numberOfTaskSlots: 2
+        parallelism.default: 1
         state.backend: filesystem
         state.checkpoints.dir: file:///tmp/flink-checkpoints
         state.savepoints.dir: file:///tmp/flink-savepoints
+        jobmanager.memory.process.size: 1600m
     volumes:
       - flink-checkpoints:/tmp/flink-checkpoints
       - flink-savepoints:/tmp/flink-savepoints
       - ./flink-jobs:/opt/flink/jobs
 
-  # Flink TaskManager - FIXED VERSION  
+  # Flink TaskManager
   taskmanager:
     image: flink:1.18-scala_2.12-java17
     depends_on:
       - jobmanager
     command: taskmanager
-    scale: 2
+    scale: 1
     environment:
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: jobmanager
         taskmanager.bind-host: 0.0.0.0
-        taskmanager.host: taskmanager
-        taskmanager.numberOfTaskSlots: 4
-        parallelism.default: 2
+        taskmanager.numberOfTaskSlots: 2
+        parallelism.default: 1
+        taskmanager.memory.process.size: 1728m
     volumes:
       - flink-checkpoints:/tmp/flink-checkpoints
       - flink-savepoints:/tmp/flink-savepoints
@@ -152,15 +154,27 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus-data:/prometheus
   
+  # Job Submitter
   job-submitter:
     build:
-      context: ./flink-job-submitter # Assuming your Dockerfile is here
+      context: ./flink-job-submitter
     container_name: job-submitter
     depends_on:
       - jobmanager
       - taskmanager
+    environment:
+      - FLINK_JOBMANAGER_HOST=jobmanager
+      - FLINK_JOBMANAGER_PORT=8081
     volumes:
       - ./target:/jobs
+      - ./logs:/opt/flink/log 
+    command: >
+      sh -c "
+        echo 'Waiting for JobManager to be ready...' &&
+        sleep 30 &&
+        echo 'Submitting job...' &&
+        /opt/flink/bin/flink run -m jobmanager:8081 -d /jobs/flink-property-listings-1.0-SNAPSHOT.jar
+      "
 
 volumes:
   zk-data:

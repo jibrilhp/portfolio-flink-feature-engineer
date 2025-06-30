@@ -2,6 +2,7 @@ services:
   # Zookeeper for Kafka
   zookeeper:
     image: confluentinc/cp-zookeeper:7.4.0
+    container_name: zookeeper
     ports:
       - "2181:2181"
     environment:
@@ -10,9 +11,12 @@ services:
     volumes:
       - zk-data:/var/lib/zookeeper/data
       - zk-txn-logs:/var/lib/zookeeper/log
+    networks:
+      - real-estate-network
 
   # Kafka Broker
   broker:
+    container_name: broker
     image: confluentinc/cp-kafka:7.4.0
     depends_on:
       - zookeeper
@@ -30,20 +34,35 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_JMX_PORT: 9101
       KAFKA_JMX_HOSTNAME: localhost
+      # Add health check settings
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 300000
     volumes:
       - kafka-data:/var/lib/kafka/data
+    networks:
+      - real-estate-network
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
-  # Schema Registry - CHANGED PORT TO AVOID CONFLICT
+  # Schema Registry
   schema-registry:
     image: confluentinc/cp-schema-registry:7.4.0
+    container_name: schema-registry
     depends_on:
-      - broker
+      broker:
+        condition: service_healthy
     ports:
-      - "8081"  
+      - "8082:8081"  # Changed to avoid conflict with Flink
     environment:
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'broker:29092'
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    networks:
+      - real-estate-network
 
   # PostgreSQL for storing features and reference data
   postgres:
@@ -58,6 +77,8 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - real-estate-network
 
   # Redis for real-time feature serving
   redis:
@@ -67,8 +88,10 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
+    networks:
+      - real-estate-network
 
- 
+  # Flink JobManager
   jobmanager:
     container_name: jobmanager
     image: flink:1.18-scala_2.12-java17
@@ -89,16 +112,29 @@ services:
         state.checkpoints.dir: file:///tmp/flink-checkpoints
         state.savepoints.dir: file:///tmp/flink-savepoints
         jobmanager.memory.process.size: 1600m
+        # Add restart strategy
+        restart-strategy: fixed-delay
+        restart-strategy.fixed-delay.attempts: 3
+        restart-strategy.fixed-delay.delay: 10s
     volumes:
       - flink-checkpoints:/tmp/flink-checkpoints
       - flink-savepoints:/tmp/flink-savepoints
       - ./flink-jobs:/opt/flink/jobs
+    networks:
+      - real-estate-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   # Flink TaskManager
   taskmanager:
     image: flink:1.18-scala_2.12-java17
+    container_name: taskmanager
     depends_on:
-      - jobmanager
+      jobmanager:
+        condition: service_healthy
     command: taskmanager
     scale: 1
     environment:
@@ -112,6 +148,8 @@ services:
     volumes:
       - flink-checkpoints:/tmp/flink-checkpoints
       - flink-savepoints:/tmp/flink-savepoints
+    networks:
+      - real-estate-network
 
   # Data Generator Service
   data-generator:
@@ -120,8 +158,10 @@ services:
       dockerfile: Dockerfile
     container_name: data-generator
     depends_on:
-      - broker
-      - postgres
+      broker:
+        condition: service_healthy
+      postgres:
+        condition: service_started
     environment:
       KAFKA_BOOTSTRAP_SERVERS: broker:29092
       POSTGRES_HOST: postgres
@@ -130,6 +170,8 @@ services:
       POSTGRES_PASSWORD: postgres
     volumes:
       - ./data-generator:/app
+    networks:
+      - real-estate-network
 
   # Grafana for monitoring
   grafana:
@@ -143,6 +185,8 @@ services:
       - grafana-data:/var/lib/grafana
       - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
       - ./grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - real-estate-network
 
   # Prometheus for metrics collection
   prometheus:
@@ -153,27 +197,58 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus-data:/prometheus
+    networks:
+      - real-estate-network
   
-  # Job Submitter
+  # Kafka Topic Creator - Separate service to create topics
+  kafka-setup:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka-setup
+    depends_on:
+      broker:
+        condition: service_healthy
+    networks:
+      - real-estate-network
+    command: >
+      sh -c "
+        echo 'Waiting for Kafka to be ready...' &&
+        sleep 30 &&
+        echo 'Creating Kafka topics...' &&
+        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic property-listings --partitions 1 --replication-factor 1 &&
+        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic price-changes --partitions 1 --replication-factor 1 &&
+        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic property-interactions --partitions 1 --replication-factor 1 &&
+        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic market-events --partitions 1 --replication-factor 1 &&
+        echo 'Listing created topics:' &&
+        kafka-topics --bootstrap-server broker:29092 --list &&
+        echo 'Topics setup completed successfully'
+      "
+
+  # Job Submitter - Simplified version
   job-submitter:
     build:
       context: ./flink-job-submitter
     container_name: job-submitter
     depends_on:
-      - jobmanager
-      - taskmanager
+      jobmanager:
+        condition: service_healthy
+      taskmanager:
+        condition: service_started
+      kafka-setup:
+        condition: service_completed_successfully
     environment:
       - FLINK_JOBMANAGER_HOST=jobmanager
       - FLINK_JOBMANAGER_PORT=8081
     volumes:
       - ./target:/jobs
       - ./logs:/opt/flink/log 
+    networks:
+      - real-estate-network
     command: >
       sh -c "
-        echo 'Waiting for JobManager to be ready...' &&
-        sleep 30 &&
-        echo 'Submitting job...' &&
-        /opt/flink/bin/flink run -m jobmanager:8081 -d /jobs/realestate-flink-1.0-SNAPSHOT.jar
+        echo 'All services ready, submitting Flink job...' &&
+        sleep 10 &&
+        /opt/flink/bin/flink run -m jobmanager:8081 -d /jobs/realestate-flink-1.0-SNAPSHOT.jar &&
+        echo 'Job submitted successfully'
       "
 
 volumes:
@@ -188,5 +263,5 @@ volumes:
   prometheus-data:
 
 networks:
-  default:
-    name: real-estate-network
+  real-estate-network:
+    driver: bridge

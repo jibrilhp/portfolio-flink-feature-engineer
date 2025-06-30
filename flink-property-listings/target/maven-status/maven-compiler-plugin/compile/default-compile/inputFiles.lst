@@ -1,1 +1,16 @@
-/home/jibrilhp/portfolio-jibs/portfolio-flink-feature-engineer/flink-property-listings/src/main/java/com/flink/poc/App.java
+/home/jibrilhp/portfolio-jibs/portfolio-flink-feature-engineer/flink-property-listings/src/main/java/com/flink/realestate/RealEstateStreamingApp.java
+/home/jibrilhp/portfolio-jibs/portfolio-flink-feature-engineer/flink-property-listings/src/main/java/com/flink/realestate/functions/InteractionCountAggregator.java
+/home/jibrilhp/portfolio-jibs/portfolio-flink-feature-engineer/flink-property-listings/src/main/java/com/flink/realestate/functions/MarketEventParser.java
+/home/jibrilhp/portfolio-jibs/portfolio-flink-feature-engineer/flink-property-listings/src/main/java/com/flink/realestate/functions/MarketTrendAggregator.java
+/home/jibrilhp/portfolio-jibs/portfolio-flink-feature-engineer/flink-property-listings/src/main/java/com/flink/realestate/functions/PriceAlertMapper.java
+/home/jibrilhp/portfolio-jibs/portfolio-flink-feature-engineer/flink-property-listings/src/main/java/com/flink/realestate/functions/PriceChangeParser.java
+/home/jibrilhp/portfolio-jibs/portfolio-flink-feature-engineer/flink-property-listings/src/main/java/com/flink/realestate/functions/PropertyInteractionParser.java
+/home/jibrilhp/portfolio-jibs/portfolio-flink-feature-engineer/flink-property-listings/src/main/java/com/flink/realestate/functions/PropertyListingParser.java
+/home/jibrilhp/portfolio-jibs/portfolio-flink-feature-engineer/flink-property-listings/src/main/java/com/flink/realestate/functions/PropertyStatsAggregator.java
+/home/jibrilhp/portfolio-jibs/portfolio-flink-feature-engineer/flink-property-listings/src/main/java/com/flink/realestate/models/MarketEvent.java
+/home/jibrilhp/portfolio-jibs/portfolio-flink-feature-engineer/flink-property-listings/src/main/java/com/flink/realestate/models/MarketTrend.java
+/home/jibrilhp/portfolio-jibs/portfolio-flink-feature-engineer/flink-property-listings/src/main/java/com/flink/realestate/models/PriceAlert.java
+/home/jibrilhp/portfolio-jibs/portfolio-flink-feature-engineer/flink-property-listings/src/main/java/com/flink/realestate/models/PriceChange.java
+/home/jibrilhp/portfolio-jibs/portfolio-flink-feature-engineer/flink-property-listings/src/main/java/com/flink/realestate/models/PropertyInteraction.java
+/home/jibrilhp/portfolio-jibs/portfolio-flink-feature-engineer/flink-property-listings/src/main/java/com/flink/realestate/models/PropertyListing.java
+/home/jibrilhp/portfolio-jibs/portfolio-flink-feature-engineer/flink-property-listings/src/main/java/com/flink/realestate/models/PropertyStats.java

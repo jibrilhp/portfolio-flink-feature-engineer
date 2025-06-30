@@ -173,7 +173,7 @@ services:
         echo 'Waiting for JobManager to be ready...' &&
         sleep 30 &&
         echo 'Submitting job...' &&
-        /opt/flink/bin/flink run -m jobmanager:8081 -d /jobs/flink-property-listings-1.0-SNAPSHOT.jar
+        /opt/flink/bin/flink run -m jobmanager:8081 -d /jobs/realestate-flink-1.0-SNAPSHOT.jar
       "
 
 volumes:

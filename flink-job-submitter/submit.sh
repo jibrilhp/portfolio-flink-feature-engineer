@@ -11,7 +11,7 @@ echo "Submitting Flink job..."
 # Submit the job
 /opt/flink/bin/flink run \
     -d \
-    /jobs/flink-property-listings-1.0-SNAPSHOT.jar
+    /jobs/realestate-flink-1.0-SNAPSHOT.jar
 
 echo "Job submitted."
 

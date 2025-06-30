@@ -19,56 +19,69 @@ public class RealEstateStreamingApp {
         env.setParallelism(1); // Set for testing, increase for production
 
         Properties kafkaProps = new Properties();
-        kafkaProps.setProperty("bootstrap.servers", "broker:9092");
+        // Use the internal Docker network address
+        kafkaProps.setProperty("bootstrap.servers", "broker:29092");
         kafkaProps.setProperty("group.id", "flink-realestate-group");
         kafkaProps.setProperty("auto.offset.reset", "latest");
 
+        // Add timeout and connection properties
+        kafkaProps.setProperty("session.timeout.ms", "30000");
+        kafkaProps.setProperty("heartbeat.interval.ms", "10000");
+        kafkaProps.setProperty("request.timeout.ms", "120000");
+        kafkaProps.setProperty("connections.max.idle.ms", "300000");
+        kafkaProps.setProperty("metadata.max.age.ms", "30000");
+        kafkaProps.setProperty("max.poll.interval.ms", "300000");
+
+        // Enable auto-commit with shorter intervals
+        kafkaProps.setProperty("enable.auto.commit", "true");
+        kafkaProps.setProperty("auto.commit.interval.ms", "5000");
+
         DataStream<String> propertyListingsStream = env
-            .addSource(new FlinkKafkaConsumer<>("property-listings", new SimpleStringSchema(), kafkaProps))
-            .name("Property Listings Source");
+                .addSource(new FlinkKafkaConsumer<>("property-listings", new SimpleStringSchema(), kafkaProps))
+                .name("Property Listings Source");
         DataStream<String> priceChangesStream = env
-            .addSource(new FlinkKafkaConsumer<>("price-changes", new SimpleStringSchema(), kafkaProps))
-            .name("Price Changes Source");
+                .addSource(new FlinkKafkaConsumer<>("price-changes", new SimpleStringSchema(), kafkaProps))
+                .name("Price Changes Source");
         DataStream<String> interactionsStream = env
-            .addSource(new FlinkKafkaConsumer<>("property-interactions", new SimpleStringSchema(), kafkaProps))
-            .name("Property Interactions Source");
+                .addSource(new FlinkKafkaConsumer<>("property-interactions", new SimpleStringSchema(), kafkaProps))
+                .name("Property Interactions Source");
         DataStream<String> marketEventsStream = env
-            .addSource(new FlinkKafkaConsumer<>("market-events", new SimpleStringSchema(), kafkaProps))
-            .name("Market Events Source");
+                .addSource(new FlinkKafkaConsumer<>("market-events", new SimpleStringSchema(), kafkaProps))
+                .name("Market Events Source");
 
         DataStream<PropertyListing> parsedListings = propertyListingsStream
-            .map(new PropertyListingParser())
-            .name("Parse Property Listings");
+                .map(new PropertyListingParser())
+                .name("Parse Property Listings");
         DataStream<PriceChange> parsedPriceChanges = priceChangesStream
-            .map(new PriceChangeParser())
-            .name("Parse Price Changes");
+                .map(new PriceChangeParser())
+                .name("Parse Price Changes");
         DataStream<PropertyInteraction> parsedInteractions = interactionsStream
-            .map(new PropertyInteractionParser())
-            .name("Parse Property Interactions");
+                .map(new PropertyInteractionParser())
+                .name("Parse Property Interactions");
         DataStream<MarketEvent> parsedMarketEvents = marketEventsStream
-            .map(new MarketEventParser())
-            .name("Parse Market Events");
+                .map(new MarketEventParser())
+                .name("Parse Market Events");
 
         DataStream<Tuple2<String, PropertyStats>> neighborhoodStats = parsedListings
-            .keyBy(PropertyListing::getNeighborhoodId)
-            .window(TumblingProcessingTimeWindows.of(Time.minutes(5)))
-            .aggregate(new PropertyStatsAggregator())
-            .name("Neighborhood Property Stats");
+                .keyBy(PropertyListing::getNeighborhoodId)
+                .window(TumblingProcessingTimeWindows.of(Time.minutes(5)))
+                .aggregate(new PropertyStatsAggregator())
+                .name("Neighborhood Property Stats");
         DataStream<PriceAlert> priceAlerts = parsedPriceChanges
-            .filter(change -> Math.abs(change.getChangePercentage()) > 10.0)
-            .map(new PriceAlertMapper())
-            .name("Price Change Alerts");
+                .filter(change -> Math.abs(change.getChangePercentage()) > 10.0)
+                .map(new PriceAlertMapper())
+                .name("Price Change Alerts");
         DataStream<Tuple2<String, Long>> hotProperties = parsedInteractions
-            .keyBy(PropertyInteraction::getPropertyId)
-            .window(TumblingProcessingTimeWindows.of(Time.minutes(10)))
-            .aggregate(new InteractionCountAggregator())
-            .filter(tuple -> tuple.f1 > 5)
-            .name("Hot Properties Detection");
+                .keyBy(PropertyInteraction::getPropertyId)
+                .window(TumblingProcessingTimeWindows.of(Time.minutes(10)))
+                .aggregate(new InteractionCountAggregator())
+                .filter(tuple -> tuple.f1 > 5)
+                .name("Hot Properties Detection");
         DataStream<MarketTrend> marketTrends = parsedMarketEvents
-            .keyBy(MarketEvent::getNeighborhoodId)
-            .window(TumblingProcessingTimeWindows.of(Time.hours(1)))
-            .aggregate(new MarketTrendAggregator())
-            .name("Market Trend Analysis");
+                .keyBy(MarketEvent::getNeighborhoodId)
+                .window(TumblingProcessingTimeWindows.of(Time.hours(1)))
+                .aggregate(new MarketTrendAggregator())
+                .name("Market Trend Analysis");
 
         parsedListings.print("NEW_LISTING");
         priceAlerts.print("PRICE_ALERT");

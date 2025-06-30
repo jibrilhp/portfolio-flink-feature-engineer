@@ -89,6 +89,6 @@ public class RealEstateStreamingApp {
         neighborhoodStats.print("NEIGHBORHOOD_STATS");
         marketTrends.print("MARKET_TREND");
 
-        env.execute("Real Estate Streaming Analytics POC");
+        env.execute("Real Estate Streaming Analytics POC2");
     }
 }

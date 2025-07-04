@@ -145,9 +145,11 @@ services:
         taskmanager.numberOfTaskSlots: 2
         parallelism.default: 1
         taskmanager.memory.process.size: 1728m
+      - GOOGLE_APPLICATION_CREDENTIALS=/opt/flink/gcp-credentials.json
     volumes:
       - flink-checkpoints:/tmp/flink-checkpoints
       - flink-savepoints:/tmp/flink-savepoints
+      - ./gcp-credentials.json:/opt/flink/gcp-credentials.json
     networks:
       - real-estate-network
 

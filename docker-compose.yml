@@ -245,6 +245,7 @@ services:
     environment:
       - FLINK_JOBMANAGER_HOST=jobmanager
       - FLINK_JOBMANAGER_PORT=8081
+      - FLINK_JOBMANAGER_URL=http://jobmanager:8081  # Add this
     volumes:
       - ./target:/jobs
       - ./logs:/opt/flink/log 
@@ -252,20 +253,16 @@ services:
       - ./beam-sdks-java-io-kafka-2.57.0.jar:/opt/flink/lib/beam-sdks-java-io-kafka-2.57.0.jar
       - ./beam-sdks-java-io-google-cloud-platform-2.57.0.jar:/opt/flink/lib/beam-sdks-java-io-google-cloud-platform-2.57.0.jar
       - ./beam-runners-flink-1.18-2.57.0.jar:/opt/flink/lib/beam-runners-flink-1.18-2.57.0.jar
-
     networks:
       - real-estate-network
-    # command: >
-    #   sh -c "
-    #     echo 'All services ready, submitting Flink job...' &&
-    #     sleep 10 &&
-    #     /opt/flink/bin/flink run \
-    #     -c com.example.beam.PropertyListingPipeline \
-    #     -d \
-    #     -yD classloader.parent-first-pattern.exclusion=org.apache.beam.*,com.fasterxml.jackson.* \
-    #     /jobs/property-listing-pipeline-bundled-1.0-SNAPSHOT.jar &&
-    #     echo 'Job submitted successfully'
-    #   "
+    # Add a startup delay
+    command: >
+      sh -c "
+        echo 'Waiting for JobManager to be fully ready...' &&
+        sleep 5 &&
+        echo 'Starting job submission...' &&
+        /opt/flink/bin/flink run -c com.example.beam.FlinkPropertyListingPipeline -d /jobs/property-listing-pipeline-bundled-1.0-SNAPSHOT.jar
+      "
 
 volumes:
   zk-data:

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class RealEstateDataGenerator:
     def __init__(self):
         # Kafka configuration
-        self.kafka_servers = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
+        self.kafka_servers = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'broker:29092')
         self.producer = KafkaProducer(
             bootstrap_servers=self.kafka_servers,
             value_serializer=lambda v: json.dumps(v).encode('utf-8'),

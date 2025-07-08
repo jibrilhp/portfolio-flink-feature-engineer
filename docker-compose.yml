@@ -107,16 +107,22 @@ services:
         rest.address: 0.0.0.0
         rest.bind-address: 0.0.0.0
         rest.port: 8081
-        taskmanager.numberOfTaskSlots: 2
+        taskmanager.numberOfTaskSlots: 4
         parallelism.default: 1
         state.backend: filesystem
         state.checkpoints.dir: file:///tmp/flink-checkpoints
         state.savepoints.dir: file:///tmp/flink-savepoints
-        jobmanager.memory.process.size: 1600m
+        jobmanager.memory.process.size: 2048m
         # Add restart strategy
         restart-strategy: fixed-delay
-        restart-strategy.fixed-delay.attempts: 3
-        restart-strategy.fixed-delay.delay: 10s
+        restart-strategy.fixed-delay.attempts: 5
+        restart-strategy.fixed-delay.delay: 30s
+        # Add slot sharing and resource optimization
+        slot.sharing.enabled: true
+        cluster.evenly-spread-out-slots: true
+        # Increase timeouts for resource allocation
+        slot.request.timeout: 300000
+        slot.idle.timeout: 300000
     volumes:
       - flink-checkpoints:/tmp/flink-checkpoints
       - flink-savepoints:/tmp/flink-savepoints
@@ -132,23 +138,22 @@ services:
       timeout: 10s
       retries: 5
 
-  # Flink TaskManager
+# Flink TaskManager
   taskmanager:
     image: flink:1.18-scala_2.12-java17
-    container_name: taskmanager
     depends_on:
       jobmanager:
         condition: service_healthy
     command: taskmanager
-    scale: 1
+    scale: 2  # Increased from 1 to 2 for more slots
     environment:
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: jobmanager
         taskmanager.bind-host: 0.0.0.0
-        taskmanager.numberOfTaskSlots: 2
+        taskmanager.numberOfTaskSlots: 4
         parallelism.default: 1
-        taskmanager.memory.process.size: 1728m
+        taskmanager.memory.process.size: 2048m
       - GOOGLE_APPLICATION_CREDENTIALS=/opt/flink/gcp-credentials.json
     volumes:
       - flink-checkpoints:/tmp/flink-checkpoints
@@ -246,24 +251,39 @@ services:
     environment:
       - FLINK_JOBMANAGER_HOST=jobmanager
       - FLINK_JOBMANAGER_PORT=8081
-      - FLINK_JOBMANAGER_URL=http://jobmanager:8081  # Add this
+      - FLINK_JOBMANAGER_URL=http://jobmanager:8081
     volumes:
       - ./target:/jobs
       - ./logs:/opt/flink/log 
       - ./beam-sdks-java-core-2.57.0.jar:/opt/flink/lib/beam-sdks-java-core-2.57.0.jar
       - ./beam-sdks-java-io-kafka-2.57.0.jar:/opt/flink/lib/beam-sdks-java-io-kafka-2.57.0.jar
-      # - ./beam-sdks-java-io-google-cloud-platform-2.57.0.jar:/opt/flink/lib/beam-sdks-java-io-google-cloud-platform-2.57.0.jar
       - ./beam-runners-flink-1.18-2.57.0.jar:/opt/flink/lib/beam-runners-flink-1.18-2.57.0.jar
     networks:
       - real-estate-network
-    # Add a startup delay
     command: >
       sh -c "
-        echo 'Waiting for JobManager to be fully ready...' &&
-        sleep 5 &&
-        echo 'Starting job submission...' &&
-        /opt/flink/bin/flink run -c com.example.beam.FlinkPropertyListingPipeline -d /jobs/property-listing-pipeline-bundled-1.0-SNAPSHOT.jar
+        echo 'Waiting for JobManager and TaskManagers to be fully ready...' &&
+        sleep 30 &&
+        echo 'Checking TaskManager availability...' &&
+        until curl -s http://jobmanager:8081/taskmanagers | grep -q 'taskmanagers'; do
+          echo 'Waiting for TaskManagers to register...' &&
+          sleep 10
+        done &&
+        echo 'TaskManagers are ready. Starting job submission...' &&
+        /opt/flink/bin/flink run \
+          -c com.example.beam.FlinkPropertyListingPipeline \
+          -d \
+          --parallelism 1 \
+          --max-parallelism 4 \
+          /jobs/property-listing-pipeline-bundled-1.0-SNAPSHOT.jar \
+          --runner=FlinkRunner \
+          --streaming=true \
+          --parallelism=1 \
+          --maxParallelism=4 \
+          --attachedMode=false ||
+        echo 'Job submission completed (may have failed - check Flink UI)'
       "
+    restart: "no"
 
 volumes:
   zk-data:

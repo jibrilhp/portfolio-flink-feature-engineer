@@ -41,6 +41,8 @@ public class FlinkPropertyListingPipeline {
 
         // Explicitly set the runner (backup)
         options.setRunner(FlinkRunner.class);
+        options.setAttachedMode(false);
+        // options.setFlinkMaster("jobmanager:8081");
         options.setStreaming(true);
         options.setParallelism(1);
         options.setMaxParallelism(128);
@@ -86,6 +88,13 @@ public class FlinkPropertyListingPipeline {
         System.out.println("Pipeline starting... Output will be written to: " + outputPath);
         System.out.println("Check for files like: " + outputPath + "-*-of-*.txt");
         
-        p.run().waitUntilFinish();
+        // Fixed: Don't call waitUntilFinish() in web submission mode
+        try {
+            p.run();
+            System.out.println("Pipeline submitted successfully!");
+        } catch (Exception e) {
+            System.err.println("Pipeline submission failed: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 }

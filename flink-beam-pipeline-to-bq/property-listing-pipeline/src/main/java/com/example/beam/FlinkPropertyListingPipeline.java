@@ -4,10 +4,14 @@ import org.apache.beam.runners.flink.FlinkPipelineOptions;
 import org.apache.beam.runners.flink.FlinkRunner;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.io.kafka.KafkaIO;
+import org.apache.beam.sdk.io.TextIO;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.SimpleFunction;
+import org.apache.beam.sdk.transforms.windowing.FixedWindows;
+import org.apache.beam.sdk.transforms.windowing.Window;
 import org.apache.beam.sdk.values.KV;
+import org.joda.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.ArrayList;
@@ -50,6 +54,7 @@ public class FlinkPropertyListingPipeline {
 
         String bootstrapServers = "broker:29092";
         String kafkaTopic = "property-listings";
+        String outputPath = "/tmp/property-listings-output";
 
         p.apply("ReadFromKafka", KafkaIO.<String, String>read()
                 .withBootstrapServers(bootstrapServers)
@@ -57,14 +62,30 @@ public class FlinkPropertyListingPipeline {
                 .withKeyDeserializer(org.apache.kafka.common.serialization.StringDeserializer.class)
                 .withValueDeserializer(org.apache.kafka.common.serialization.StringDeserializer.class)
                 .withoutMetadata())
-                .apply("PrintMessages", MapElements.via(new SimpleFunction<KV<String, String>, String>() {
+                .apply("ExtractValue", MapElements.via(new SimpleFunction<KV<String, String>, String>() {
                     @Override
                     public String apply(KV<String, String> input) {
-                        System.out.println("Received: " + input.getValue());
-                        return input.getValue();
+                        String timestamp = java.time.Instant.now().toString();
+                        String message = String.format("[%s] Key: %s, Value: %s", 
+                                                     timestamp, 
+                                                     input.getKey(), 
+                                                     input.getValue());
+                        System.out.println("Processing: " + message);
+                        return message;
                     }
-                }));
+                }))
+                // Add windowing for streaming mode
+                .apply("WindowIntoFixedWindows", Window.<String>into(
+                        FixedWindows.of(Duration.standardSeconds(30))))
+                .apply("WriteToFiles", TextIO.write()
+                        .to(outputPath)
+                        .withWindowedWrites()
+                        .withNumShards(1)
+                        .withSuffix(".txt"));
 
+        System.out.println("Pipeline starting... Output will be written to: " + outputPath);
+        System.out.println("Check for files like: " + outputPath + "-*-of-*.txt");
+        
         p.run().waitUntilFinish();
     }
 }

@@ -22,6 +22,7 @@ services:
       - zookeeper
     ports:
       - "9092:9092"
+      - "29092:29092"
       - "9101:9101"
     environment:
       KAFKA_BROKER_ID: 1
@@ -60,7 +61,7 @@ services:
     environment:
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'broker:29092'
-      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8082
     networks:
       - real-estate-network
 
@@ -251,7 +252,7 @@ services:
       - ./logs:/opt/flink/log 
       - ./beam-sdks-java-core-2.57.0.jar:/opt/flink/lib/beam-sdks-java-core-2.57.0.jar
       - ./beam-sdks-java-io-kafka-2.57.0.jar:/opt/flink/lib/beam-sdks-java-io-kafka-2.57.0.jar
-      - ./beam-sdks-java-io-google-cloud-platform-2.57.0.jar:/opt/flink/lib/beam-sdks-java-io-google-cloud-platform-2.57.0.jar
+      # - ./beam-sdks-java-io-google-cloud-platform-2.57.0.jar:/opt/flink/lib/beam-sdks-java-io-google-cloud-platform-2.57.0.jar
       - ./beam-runners-flink-1.18-2.57.0.jar:/opt/flink/lib/beam-runners-flink-1.18-2.57.0.jar
     networks:
       - real-estate-network

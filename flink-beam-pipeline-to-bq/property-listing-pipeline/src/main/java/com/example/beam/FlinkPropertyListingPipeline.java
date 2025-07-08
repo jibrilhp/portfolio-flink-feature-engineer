@@ -52,7 +52,7 @@ public class FlinkPropertyListingPipeline {
 
         Pipeline p = Pipeline.create(options);
 
-        String bootstrapServers = "broker:9092";
+        String bootstrapServers = "broker:29092";
         String kafkaTopic = "property-listings";
         String outputPath = "/tmp/property-listings-output";
 

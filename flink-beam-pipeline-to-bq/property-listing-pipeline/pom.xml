@@ -105,7 +105,7 @@
               <finalName>${project.artifactId}-bundled-${project.version}</finalName>
               <createDependencyReducedPom>false</createDependencyReducedPom>
               <shadedArtifactAttached>false</shadedArtifactAttached>
-              
+
               <!-- Remove the filters section that was excluding too much -->
               <filters>
                 <filter>
@@ -117,30 +117,39 @@
                   </excludes>
                 </filter>
               </filters>
-              
+
               <transformers>
                 <!-- Service files transformer -->
-                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer" />
-                
+                <transformer
+                  implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer" />
+
                 <!-- Manifest transformer -->
-                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                <transformer
+                  implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                   <mainClass>com.example.beam.FlinkPropertyListingPipeline</mainClass>
                 </transformer>
-                
+
                 <!-- Append transformers for configuration files -->
-                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                <transformer
+                  implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
                   <resource>reference.conf</resource>
                 </transformer>
-                
-                <!-- Properties transformer -->
-                <transformer implementation="org.apache.maven.plugins.shade.resource.PropertiesTransformer">
+
+                <!-- Resource transformers for Spring files -->
+                <transformer
+                  implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
                   <resource>META-INF/spring.handlers</resource>
                 </transformer>
-                <transformer implementation="org.apache.maven.plugins.shade.resource.PropertiesTransformer">
+                <transformer
+                  implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
                   <resource>META-INF/spring.schemas</resource>
                 </transformer>
+
+                <!-- Include all META-INF/services files -->
+                <transformer
+                  implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer" />
               </transformers>
-              
+
               <!-- Relocations to avoid conflicts -->
               <relocations>
                 <relocation>

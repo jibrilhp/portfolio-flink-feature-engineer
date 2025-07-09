@@ -35,7 +35,6 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_JMX_PORT: 9101
       KAFKA_JMX_HOSTNAME: localhost
-      # Add health check settings
       KAFKA_LOG_RETENTION_HOURS: 168
       KAFKA_LOG_SEGMENT_BYTES: 1073741824
       KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 300000
@@ -57,13 +56,18 @@ services:
       broker:
         condition: service_healthy
     ports:
-      - "8082:8081"  # Changed to avoid conflict with Flink
+      - "8082:8081"
     environment:
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'broker:29092'
-      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8082
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
     networks:
       - real-estate-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/subjects || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   # PostgreSQL for storing features and reference data
   postgres:
@@ -78,11 +82,15 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
-      # Add this volume for PostgreSQL configuration
       - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
     networks:
       - real-estate-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d real_estate"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
       
   kafka-connect:
     build:
@@ -91,8 +99,10 @@ services:
     depends_on:
       broker:
         condition: service_healthy
+      schema-registry:
+        condition: service_healthy
       postgres:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "8083:8083"
     environment:
@@ -106,8 +116,8 @@ services:
       CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
       CONNECT_KEY_CONVERTER: io.confluent.connect.avro.AvroConverter
       CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
-      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8082
-      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8082
+      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
       CONNECT_INTERNAL_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
       CONNECT_INTERNAL_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
       CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
@@ -120,7 +130,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-
 
   # Debezium UI (optional, for easier management)
   debezium-ui:
@@ -136,55 +145,58 @@ services:
     networks:
       - real-estate-network
 
-  # Service to create Kafka Connect topics and setup Debezium connector
+  # Kafka Topic Creator - Separate service to create topics
+  kafka-setup:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka-setup
+    depends_on:
+      broker:
+        condition: service_healthy
+    networks:
+      - real-estate-network
+    command: >
+      sh -c "
+        echo 'Waiting for Kafka to be ready...' &&
+        sleep 30 &&
+        echo 'Creating Kafka topics...' &&
+        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic property-listings --partitions 1 --replication-factor 1 &&
+        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic price-changes --partitions 1 --replication-factor 1 &&
+        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic property-interactions --partitions 1 --replication-factor 1 &&
+        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic market-events --partitions 1 --replication-factor 1 &&
+        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic connect-configs --partitions 1 --replication-factor 1 --config cleanup.policy=compact &&
+        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic connect-offsets --partitions 25 --replication-factor 1 --config cleanup.policy=compact &&
+        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic connect-status --partitions 5 --replication-factor 1 --config cleanup.policy=compact &&
+        echo 'Listing created topics:' &&
+        kafka-topics --bootstrap-server broker:29092 --list &&
+        echo 'Topics setup completed successfully'
+      "
+    restart: "no"
+
+  # Service to setup Debezium connector - FIXED VERSION
   debezium-setup:
     image: confluentinc/cp-kafka:7.4.0
     container_name: debezium-setup
     depends_on:
       kafka-connect:
         condition: service_healthy
+      kafka-setup:
+        condition: service_completed_successfully
     networks:
       - real-estate-network
+    volumes:
+      - ./debezium-config.json:/tmp/debezium-config.json
     command: >
       sh -c "
         echo 'Waiting for Kafka Connect to be ready...' &&
         sleep 30 &&
-        echo 'Creating Kafka Connect topics...' &&
-        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic connect-configs --partitions 1 --replication-factor 1 &&
-        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic connect-offsets --partitions 1 --replication-factor 1 &&
-        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic connect-status --partitions 1 --replication-factor 1 &&
         echo 'Setting up Debezium PostgreSQL connector...' &&
-        sleep 10 &&
         curl -X POST http://kafka-connect:8083/connectors \
           -H 'Content-Type: application/json' \
-          -d @- <<EOF
-          {
-            \"name\": \"postgres-connector\",
-            \"config\": {
-              \"connector.class\": \"io.debezium.connector.postgresql.PostgresConnector\",
-              \"database.hostname\": \"postgres\",
-              \"database.port\": \"5432\",
-              \"database.user\": \"postgres\",
-              \"database.password\": \"postgres\",
-              \"database.dbname\": \"real_estate\",
-              \"database.server.name\": \"realestate\",
-              \"table.include.list\": \"public.properties,public.price_history\",
-              \"plugin.name\": \"pgoutput\",
-              \"slot.name\": \"debezium_slot\",
-              \"publication.name\": \"debezium_publication\",
-              \"key.converter\": \"io.confluent.connect.avro.AvroConverter\",
-              \"value.converter\": \"io.confluent.connect.avro.AvroConverter\",
-              \"key.converter.schema.registry.url\": \"http://schema-registry:8082\",
-              \"value.converter.schema.registry.url\": \"http://schema-registry:8082\",
-              \"transforms\": \"route\",
-              \"transforms.route.type\": \"org.apache.kafka.connect.transforms.RegexRouter\",
-              \"transforms.route.regex\": \"([^.]+)\\.([^.]+)\\.([^.]+)\",
-              \"transforms.route.replacement\": \"cdc.\$$3\"
-            }
-          }
-        EOF
-        "
+          -d @/tmp/debezium-config.json &&
+        echo 'Debezium connector setup completed'
+      "
     restart: "no"
+
   # Redis for real-time feature serving
   redis:
     image: redis:7-alpine
@@ -217,14 +229,11 @@ services:
         state.checkpoints.dir: file:///tmp/flink-checkpoints
         state.savepoints.dir: file:///tmp/flink-savepoints
         jobmanager.memory.process.size: 2048m
-        # Add restart strategy
         restart-strategy: fixed-delay
         restart-strategy.fixed-delay.attempts: 5
         restart-strategy.fixed-delay.delay: 30s
-        # Add slot sharing and resource optimization
         slot.sharing.enabled: true
         cluster.evenly-spread-out-slots: true
-        # Increase timeouts for resource allocation
         slot.request.timeout: 300000
         slot.idle.timeout: 300000
     volumes:
@@ -242,14 +251,14 @@ services:
       timeout: 10s
       retries: 5
 
-# Flink TaskManager
+  # Flink TaskManager
   taskmanager:
     image: flink:1.18-scala_2.12-java17
     depends_on:
       jobmanager:
         condition: service_healthy
     command: taskmanager
-    scale: 2  # Increased from 1 to 2 for more slots
+    scale: 2
     environment:
       - |
         FLINK_PROPERTIES=
@@ -278,7 +287,7 @@ services:
       broker:
         condition: service_healthy
       postgres:
-        condition: service_started
+        condition: service_healthy
     environment:
       KAFKA_BOOTSTRAP_SERVERS: broker:29092
       POSTGRES_HOST: postgres
@@ -289,56 +298,6 @@ services:
       - ./data-generator:/app
     networks:
       - real-estate-network
-
-  # Grafana for monitoring
-  # grafana:
-  #   image: grafana/grafana:10.0.0
-  #   container_name: grafana
-  #   ports:
-  #     - "3000:3000"
-  #   environment:
-  #     - GF_SECURITY_ADMIN_PASSWORD=admin
-  #   volumes:
-  #     - grafana-data:/var/lib/grafana
-  #     - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
-  #     - ./grafana/datasources:/etc/grafana/provisioning/datasources
-  #   networks:
-  #     - real-estate-network
-
-  # Prometheus for metrics collection
-  # prometheus:
-  #   image: prom/prometheus:v2.45.0
-  #   container_name: prometheus
-  #   ports:
-  #     - "9090:9090"
-  #   volumes:
-  #     - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-  #     - prometheus-data:/prometheus
-  #   networks:
-  #     - real-estate-network
-  
-  # Kafka Topic Creator - Separate service to create topics
-  kafka-setup:
-    image: confluentinc/cp-kafka:7.4.0
-    container_name: kafka-setup
-    depends_on:
-      broker:
-        condition: service_healthy
-    networks:
-      - real-estate-network
-    command: >
-      sh -c "
-        echo 'Waiting for Kafka to be ready...' &&
-        sleep 30 &&
-        echo 'Creating Kafka topics...' &&
-        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic property-listings --partitions 1 --replication-factor 1 &&
-        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic price-changes --partitions 1 --replication-factor 1 &&
-        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic property-interactions --partitions 1 --replication-factor 1 &&
-        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic market-events --partitions 1 --replication-factor 1 &&
-        echo 'Listing created topics:' &&
-        kafka-topics --bootstrap-server broker:29092 --list &&
-        echo 'Topics setup completed successfully'
-      "
 
   # Job Submitter - Simplified version
   job-submitter:
@@ -355,17 +314,15 @@ services:
     environment:
       - FLINK_JOBMANAGER_HOST=jobmanager
       - FLINK_JOBMANAGER_PORT=8081
-      - FLINK_JOBMANAGER_URL=http://jobmanager:8081  # Add this
+      - FLINK_JOBMANAGER_URL=http://jobmanager:8081
     volumes:
       - ./target:/jobs
       - ./logs:/opt/flink/log 
       - ./beam-sdks-java-core-2.57.0.jar:/opt/flink/lib/beam-sdks-java-core-2.57.0.jar
       - ./beam-sdks-java-io-kafka-2.57.0.jar:/opt/flink/lib/beam-sdks-java-io-kafka-2.57.0.jar
-      # - ./beam-sdks-java-io-google-cloud-platform-2.57.0.jar:/opt/flink/lib/beam-sdks-java-io-google-cloud-platform-2.57.0.jar
       - ./beam-runners-flink-1.18-2.57.0.jar:/opt/flink/lib/beam-runners-flink-1.18-2.57.0.jar
     networks:
       - real-estate-network
-    # Add a startup delay
     command: |
         sh -c "
           echo 'Waiting for JobManager to be fully ready...' &&

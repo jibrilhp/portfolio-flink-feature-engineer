@@ -78,9 +78,113 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+      # Add this volume for PostgreSQL configuration
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    networks:
+      - real-estate-network
+      
+  kafka-connect:
+    build:
+      context: ./kafka-connect-custom
+    container_name: kafka-connect
+    depends_on:
+      broker:
+        condition: service_healthy
+      postgres:
+        condition: service_started
+    ports:
+      - "8083:8083"
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: broker:29092
+      CONNECT_GROUP_ID: connect-cluster
+      CONNECT_CONFIG_STORAGE_TOPIC: connect-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: connect-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: connect-status
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8082
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8082
+      CONNECT_INTERNAL_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_INTERNAL_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
+      CONNECT_REST_PORT: 8083
+      CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components
+    networks:
+      - real-estate-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8083/connectors || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+
+  # Debezium UI (optional, for easier management)
+  debezium-ui:
+    image: debezium/debezium-ui:2.4
+    container_name: debezium-ui
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CONNECT_URIS: http://kafka-connect:8083
     networks:
       - real-estate-network
 
+  # Service to create Kafka Connect topics and setup Debezium connector
+  debezium-setup:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: debezium-setup
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+    networks:
+      - real-estate-network
+    command: >
+      sh -c "
+        echo 'Waiting for Kafka Connect to be ready...' &&
+        sleep 30 &&
+        echo 'Creating Kafka Connect topics...' &&
+        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic connect-configs --partitions 1 --replication-factor 1 &&
+        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic connect-offsets --partitions 1 --replication-factor 1 &&
+        kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic connect-status --partitions 1 --replication-factor 1 &&
+        echo 'Setting up Debezium PostgreSQL connector...' &&
+        sleep 10 &&
+        curl -X POST http://kafka-connect:8083/connectors \
+          -H 'Content-Type: application/json' \
+          -d @- <<EOF
+          {
+            \"name\": \"postgres-connector\",
+            \"config\": {
+              \"connector.class\": \"io.debezium.connector.postgresql.PostgresConnector\",
+              \"database.hostname\": \"postgres\",
+              \"database.port\": \"5432\",
+              \"database.user\": \"postgres\",
+              \"database.password\": \"postgres\",
+              \"database.dbname\": \"real_estate\",
+              \"database.server.name\": \"realestate\",
+              \"table.include.list\": \"public.properties,public.price_history\",
+              \"plugin.name\": \"pgoutput\",
+              \"slot.name\": \"debezium_slot\",
+              \"publication.name\": \"debezium_publication\",
+              \"key.converter\": \"io.confluent.connect.avro.AvroConverter\",
+              \"value.converter\": \"io.confluent.connect.avro.AvroConverter\",
+              \"key.converter.schema.registry.url\": \"http://schema-registry:8082\",
+              \"value.converter.schema.registry.url\": \"http://schema-registry:8082\",
+              \"transforms\": \"route\",
+              \"transforms.route.type\": \"org.apache.kafka.connect.transforms.RegexRouter\",
+              \"transforms.route.regex\": \"([^.]+)\\.([^.]+)\\.([^.]+)\",
+              \"transforms.route.replacement\": \"cdc.\$$3\"
+            }
+          }
+        EOF
+        "
+    restart: "no"
   # Redis for real-time feature serving
   redis:
     image: redis:7-alpine
@@ -187,31 +291,31 @@ services:
       - real-estate-network
 
   # Grafana for monitoring
-  grafana:
-    image: grafana/grafana:10.0.0
-    container_name: grafana
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
-      - ./grafana/datasources:/etc/grafana/provisioning/datasources
-    networks:
-      - real-estate-network
+  # grafana:
+  #   image: grafana/grafana:10.0.0
+  #   container_name: grafana
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - GF_SECURITY_ADMIN_PASSWORD=admin
+  #   volumes:
+  #     - grafana-data:/var/lib/grafana
+  #     - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+  #     - ./grafana/datasources:/etc/grafana/provisioning/datasources
+  #   networks:
+  #     - real-estate-network
 
   # Prometheus for metrics collection
-  prometheus:
-    image: prom/prometheus:v2.45.0
-    container_name: prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus-data:/prometheus
-    networks:
-      - real-estate-network
+  # prometheus:
+  #   image: prom/prometheus:v2.45.0
+  #   container_name: prometheus
+  #   ports:
+  #     - "9090:9090"
+  #   volumes:
+  #     - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+  #     - prometheus-data:/prometheus
+  #   networks:
+  #     - real-estate-network
   
   # Kafka Topic Creator - Separate service to create topics
   kafka-setup:
@@ -251,38 +355,23 @@ services:
     environment:
       - FLINK_JOBMANAGER_HOST=jobmanager
       - FLINK_JOBMANAGER_PORT=8081
-      - FLINK_JOBMANAGER_URL=http://jobmanager:8081
+      - FLINK_JOBMANAGER_URL=http://jobmanager:8081  # Add this
     volumes:
       - ./target:/jobs
       - ./logs:/opt/flink/log 
       - ./beam-sdks-java-core-2.57.0.jar:/opt/flink/lib/beam-sdks-java-core-2.57.0.jar
       - ./beam-sdks-java-io-kafka-2.57.0.jar:/opt/flink/lib/beam-sdks-java-io-kafka-2.57.0.jar
+      # - ./beam-sdks-java-io-google-cloud-platform-2.57.0.jar:/opt/flink/lib/beam-sdks-java-io-google-cloud-platform-2.57.0.jar
       - ./beam-runners-flink-1.18-2.57.0.jar:/opt/flink/lib/beam-runners-flink-1.18-2.57.0.jar
     networks:
       - real-estate-network
-    command: >
-      sh -c "
-        echo 'Waiting for JobManager and TaskManagers to be fully ready...' &&
-        sleep 30 &&
-        echo 'Checking TaskManager availability...' &&
-        until curl -s http://jobmanager:8081/taskmanagers | grep -q 'taskmanagers'; do
-          echo 'Waiting for TaskManagers to register...' &&
-          sleep 10
-        done &&
-        echo 'TaskManagers are ready. Starting job submission...' &&
-        /opt/flink/bin/flink run \
-          -c com.example.beam.FlinkPropertyListingPipeline \
-          -d \
-          --parallelism 1 \
-          --max-parallelism 4 \
-          /jobs/property-listing-pipeline-bundled-1.0-SNAPSHOT.jar \
-          --runner=FlinkRunner \
-          --streaming=true \
-          --parallelism=1 \
-          --maxParallelism=4 \
-          --attachedMode=false ||
-        echo 'Job submission completed (may have failed - check Flink UI)'
-      "
+    # Add a startup delay
+    command: |
+        sh -c "
+          echo 'Waiting for JobManager to be fully ready...' &&
+          sleep 5 &&
+          echo 'Starting job submission...' &&
+          /opt/flink/bin/flink run -c com.example.beam.FlinkPropertyListingPipeline -d /jobs/property-listing-pipeline-bundled-1.0-SNAPSHOT.jar "
     restart: "no"
 
 volumes:

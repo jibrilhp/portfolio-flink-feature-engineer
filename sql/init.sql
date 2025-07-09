@@ -177,3 +177,46 @@ FROM price_changes pc
 JOIN property_listings pl ON pc.property_id = pl.property_id
 JOIN neighborhoods n ON pl.neighborhood_id = n.id
 WHERE pc.change_date >= CURRENT_DATE - INTERVAL '30 days';
+
+
+ALTER USER postgres WITH REPLICATION;
+
+-- Create publication for Debezium
+CREATE PUBLICATION debezium_publication FOR ALL TABLES;
+
+-- Create replication slot (optional, Debezium can create it automatically)
+-- SELECT pg_create_logical_replication_slot('debezium_slot', 'pgoutput');
+
+-- Example tables for CDC (adjust based on your schema)
+CREATE TABLE IF NOT EXISTS properties (
+    id SERIAL PRIMARY KEY,
+    address VARCHAR(255),
+    price DECIMAL(10,2),
+    bedrooms INTEGER,
+    bathrooms INTEGER,
+    square_feet INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS price_history (
+    id SERIAL PRIMARY KEY,
+    property_id INTEGER REFERENCES properties(id),
+    old_price DECIMAL(10,2),
+    new_price DECIMAL(10,2),
+    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create trigger to update updated_at timestamp
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+CREATE TRIGGER update_properties_updated_at 
+    BEFORE UPDATE ON properties 
+    FOR EACH ROW 
+    EXECUTE FUNCTION update_updated_at_column();

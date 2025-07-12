@@ -93,8 +93,7 @@ services:
       retries: 5
       
   kafka-connect:
-    build:
-      context: ./kafka-connect-custom
+    image: debezium/connect:2.3.4.Final
     container_name: kafka-connect
     depends_on:
       broker:
@@ -106,23 +105,44 @@ services:
     ports:
       - "8083:8083"
     environment:
-      CONNECT_BOOTSTRAP_SERVERS: broker:29092
-      CONNECT_GROUP_ID: connect-cluster
-      CONNECT_CONFIG_STORAGE_TOPIC: connect-configs
-      CONNECT_OFFSET_STORAGE_TOPIC: connect-offsets
-      CONNECT_STATUS_STORAGE_TOPIC: connect-status
+      BOOTSTRAP_SERVERS: broker:29092
+      GROUP_ID: connect-cluster
+      CONFIG_STORAGE_TOPIC: connect-configs
+      OFFSET_STORAGE_TOPIC: connect-offsets
+      STATUS_STORAGE_TOPIC: connect-status
+      
+      # Key and Value Converters
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      KEY_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8082
+      VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8082
+      
+      # Internal Key and Value Converters
+      INTERNAL_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      INTERNAL_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      
+      # REST API Configuration
+      REST_ADVERTISED_HOST_NAME: kafka-connect
+      REST_PORT: 8083
+      
+      # Plugin Path
+      PLUGIN_PATH: /kafka/connect
+      
+      # Connect Configuration
       CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
       CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
       CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
-      CONNECT_KEY_CONVERTER: io.confluent.connect.avro.AvroConverter
-      CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
-      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
-      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
-      CONNECT_INTERNAL_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
-      CONNECT_INTERNAL_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
-      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
-      CONNECT_REST_PORT: 8083
-      CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components
+      
+      # Fixed Logging Configuration
+      # CONNECT_LOG4J_ROOT_LOGLEVEL: INFO
+      # CONNECT_LOG4J_APPENDER_STDOUT: org.apache.log4j.ConsoleAppender
+      # CONNECT_LOG4J_APPENDER_STDOUT_LAYOUT: org.apache.log4j.PatternLayout
+      # CONNECT_LOG4J_APPENDER_STDOUT_LAYOUT_CONVERSIONPATTERN: "[%d] %p %X{connector.context}%m (%c:%L)%n"
+      
+      # Heap Settings
+
+      KAFKA_HEAP_OPTS: "-Xmx1G -Xms1G"
+
     networks:
       - real-estate-network
     healthcheck:
@@ -130,6 +150,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+    volumes:
+      - ./debezium-config.json:/tmp/debezium-config.json
+      - ./log4j.properties:/kafka/config/log4j.properties
 
   # Debezium UI (optional, for easier management)
   debezium-ui:

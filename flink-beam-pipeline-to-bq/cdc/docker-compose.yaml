@@ -1,0 +1,151 @@
+version: '3.8'
+
+services:
+  # PostgreSQL as source database
+  postgres:
+    image: postgres:15
+    container_name: postgres-source
+    environment:
+      POSTGRES_DB: sourcedb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    command: >
+      postgres -c wal_level=logical
+               -c max_wal_senders=1
+               -c max_replication_slots=1
+    networks:
+      - cdc-network
+
+  # Zookeeper for Kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: zookeeper-new
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - cdc-network
+
+  # Kafka
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka
+    depends_on:
+      - zookeeper-new
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper-new:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - cdc-network
+
+  # Kafka Connect with Debezium
+  kafka-connect:
+      image: debezium/connect:2.4
+      container_name: kafka-connect-new
+      depends_on:
+        - kafka
+        - postgres
+      ports:
+        - "8083:8083"
+      environment:
+        BOOTSTRAP_SERVERS: kafka:29092
+        GROUP_ID: 1
+        CONFIG_STORAGE_TOPIC: debezium_connect_configs
+        OFFSET_STORAGE_TOPIC: debezium_connect_offsets
+        STATUS_STORAGE_TOPIC: debezium_connect_statuses
+        CONFIG_STORAGE_REPLICATION_FACTOR: 1
+        OFFSET_STORAGE_REPLICATION_FACTOR: 1
+        STATUS_STORAGE_REPLICATION_FACTOR: 1
+      volumes:
+        # - ./connectors:/kafka/connect
+        - ./gcp-credentials:/opt/kafka/gcp-credentials
+      networks:
+        - cdc-network
+
+  # Flink Job Manager
+  flink-jobmanager:
+    image: flink:1.18.0-scala_2.12
+    container_name: flink-jobmanager
+    ports:
+      - "8081:8081"
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=flink-jobmanager
+    volumes:
+      - ./flink-jobs:/opt/flink/jobs
+      - ./flink-lib:/opt/flink/lib
+      - ./gcp-credentials:/opt/flink/gcp-credentials
+    command: jobmanager
+    networks:
+      - cdc-network
+
+  # Flink Task Manager
+  flink-taskmanager:
+    image: flink:1.18.0-scala_2.12
+    container_name: flink-taskmanager
+    depends_on:
+      - flink-jobmanager
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=flink-jobmanager
+    volumes:
+      - ./flink-jobs:/opt/flink/jobs
+      - ./flink-lib:/opt/flink/lib
+      - ./gcp-credentials:/opt/flink/gcp-credentials
+    command: taskmanager
+    networks:
+      - cdc-network
+
+  # Kafka UI for monitoring
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: debezium
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://kafka-connect-new:8083
+    networks:
+      - cdc-network
+
+  # Schema Registry (optional but recommended)
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.4.0
+    container_name: schema-registry-new
+    depends_on:
+      - kafka
+    ports:
+      - "8085:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry-new
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    networks:
+      - cdc-network
+
+volumes:
+  postgres_data:
+  kafka_data:
+
+networks:
+  cdc-network:
+    driver: bridge

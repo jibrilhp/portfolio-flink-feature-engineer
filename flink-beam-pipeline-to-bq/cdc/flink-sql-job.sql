@@ -6,8 +6,8 @@ CREATE TABLE kafka_users (
     id BIGINT,
     name STRING,
     email STRING,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP,
+    created_at STRING,
+    updated_at STRING,
     __op STRING,
     __ts_ms BIGINT
 ) WITH (

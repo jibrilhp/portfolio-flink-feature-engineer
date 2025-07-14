@@ -41,6 +41,7 @@ services:
       - zookeeper-new
     ports:
       - "9092:9092"
+      - "29092:29092"
       - "9094:9094"
     environment:
       KAFKA_BROKER_ID: 1

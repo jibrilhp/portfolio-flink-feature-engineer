@@ -82,7 +82,7 @@ services:
 
   # Flink Job Manager
   flink-jobmanager:
-    image: flink:1.18.0-scala_2.12
+    image: flink:1.16.0-scala_2.12-java11
     container_name: flink-jobmanager
     ports:
       - "8081:8081"
@@ -98,7 +98,7 @@ services:
 
   # Flink Task Manager
   flink-taskmanager:
-    image: flink:1.18.0-scala_2.12
+    image: flink:1.16.0-scala_2.12-java11
     container_name: flink-taskmanager
     depends_on:
       - flink-jobmanager

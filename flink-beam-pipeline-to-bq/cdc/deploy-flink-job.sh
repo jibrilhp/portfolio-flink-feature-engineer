@@ -12,7 +12,10 @@ deploy_sql_job() {
     docker cp flink-sql-job.sql flink-jobmanager:/opt/flink/
     
     # Execute SQL job in Flink SQL client
-    docker exec -it flink-jobmanager /opt/flink/bin/sql-client.sh -f /opt/flink/flink-sql-job.sql
+    docker exec -it flink-jobmanager /opt/flink/bin/sql-client.sh --jar /opt/flink/lib/flink-connector-kafka-1.16.0.jar \
+  --jar /opt/flink/lib/flink-sql-connector-kafka-1.16.0.jar \
+  --jar /opt/flink/lib/kafka-clients-2.8.1.jar \
+  -f /opt/flink/flink-sql-job.sql 
 }
 
 # Method 2: Compile and submit Java job

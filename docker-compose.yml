@@ -17,7 +17,7 @@ services:
   # Kafka Broker
   broker:
     container_name: broker
-    image: confluentinc/cp-kafka:7.4.0
+    image: confluentinc/cp-kafka:7.4.10
     depends_on:
       - zookeeper
     ports:
@@ -170,7 +170,7 @@ services:
 
   # Kafka Topic Creator - Separate service to create topics
   kafka-setup:
-    image: confluentinc/cp-kafka:7.4.0
+    image: confluentinc/cp-kafka:7.4.10
     container_name: kafka-setup
     depends_on:
       broker:
@@ -197,7 +197,7 @@ services:
 
   # Service to setup Debezium connector - FIXED VERSION
   debezium-setup:
-    image: confluentinc/cp-kafka:7.4.0
+    image: confluentinc/cp-kafka:7.4.10
     container_name: debezium-setup
     depends_on:
       kafka-connect:
